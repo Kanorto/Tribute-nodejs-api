@@ -1,0 +1,27 @@
+{
+  "name": "tribute-nodejs-api",
+  "version": "0.2.0",
+  "description": "Toolkit for integrating Tribute Telegram subscriptions into Node.js services.",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./store": "./src/store/index.js",
+    "./config": "./src/config.js"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "tribute",
+    "telegram",
+    "subscription",
+    "webhook",
+    "billing"
+  ],
+  "author": "AI Assistant",
+  "license": "MIT"
+}

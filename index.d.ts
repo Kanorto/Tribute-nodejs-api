@@ -198,8 +198,9 @@ export class TributeSubscriptionManager extends EventEmitter {
   getSubscriptionForUser(params: { telegramUserId: string | number; planId: string; }): Promise<StoredSubscription | undefined>;
   listPayments(filters?: PaymentListFilters): Promise<PaymentRecord[]>;
   cancelSubscriptionLocally(options: ManualCancellationOptions): Promise<SubscriptionEventResult>;
-  createSubscriptionIntent(params: { planId: string; telegramUserId: string | number; metadata?: Record<string, any> }): Promise<{
+  createSubscriptionIntent(params: { planId: string; telegramUserId: string | number; metadata?: Record<string, any> }): Promise<{ 
     intentId: string;
+    intentExpiresAt: Date;
     subscriptionLink: string;
     plan: TributePlan;
   }>;

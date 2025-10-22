@@ -220,7 +220,7 @@ export class TributeSubscriptionManager extends EventEmitter {
    * @param {string} params.planId
    * @param {number|string} params.telegramUserId
    * @param {Object} [params.metadata]
-   * @returns {Promise<{ intentId: string, subscriptionLink: string, plan: TributePlan }>}
+   * @returns {Promise<{ intentId: string, intentExpiresAt: Date, subscriptionLink: string, plan: TributePlan }>}
    */
   async createSubscriptionIntent({ planId, telegramUserId, metadata = {} }) {
     const plan = this.plans.find((p) => p.id === planId);
@@ -245,6 +245,7 @@ export class TributeSubscriptionManager extends EventEmitter {
     this.logger?.debug?.('Tribute intent created', intent);
     return {
       intentId: intent.id,
+      intentExpiresAt: intent.expiresAt,
       subscriptionLink: plan.subscriptionLink,
       plan,
     };

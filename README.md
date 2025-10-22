@@ -62,6 +62,7 @@ app.post('/api/tribute/intents', async (req, res) => {
   const intent = await manager.createSubscriptionIntent({ planId, telegramUserId });
   res.json({
     intentId: intent.intentId,
+    intentExpiresAt: intent.intentExpiresAt,
     subscriptionLink: intent.subscriptionLink,
   });
 });
@@ -102,6 +103,30 @@ manager.on('event', (event) => {
 });
 ```
 
+### Экспорт планов и интеграция с фронтендом
+
+Чтобы отдать публичные данные о планах в клиентское приложение, опубликуйте endpoint, который использует `manager.listPlans()`.
+В ответе удобно сразу указывать `intentExpiresAt`, возвращаемый из `createSubscriptionIntent`, чтобы фронтенд мог показывать таймер оформления.
+
+```js
+app.get('/api/tribute/plans', (req, res) => {
+  res.json({ plans: manager.listPlans() });
+});
+
+app.post('/api/tribute/intents', async (req, res) => {
+  const { planId, telegramUserId } = req.body;
+  const intent = await manager.createSubscriptionIntent({ planId, telegramUserId, metadata: { source: 'web' } });
+  res.json({
+    intentId: intent.intentId,
+    intentExpiresAt: intent.intentExpiresAt,
+    subscriptionLink: intent.subscriptionLink,
+    plan: intent.plan,
+  });
+});
+```
+
+На фронтенде достаточно вызвать `/api/tribute/plans`, отобразить предложения и после выбора плана запросить `/api/tribute/intents`. Полученный `subscriptionLink` можно открыть в WebApp/боте, а `intentExpiresAt` использовать для обратного отсчёта до истечения действия ссылки.
+
 ## Управление состоянием и история платежей
 
 Менеджер предоставляет готовые методы, чтобы без прямого доступа к хранилищу получать данные и управлять подписками:
@@ -109,7 +134,7 @@ manager.on('event', (event) => {
 | Метод | Что делает | Особенности |
 | --- | --- | --- |
 | `listPlans()` | Возвращает публичное описание планов (для UI). | Берёт данные из конфигурации, безопасно для фронтенда. |
-| `createSubscriptionIntent({ planId, telegramUserId, metadata })` | Создаёт интент и выдаёт ссылку Tribute. | Интент живёт `intentTtlMs`, сохраняется в хранилище. |
+| `createSubscriptionIntent({ planId, telegramUserId, metadata })` | Создаёт интент и выдаёт ссылку Tribute. | Возвращает `intentExpiresAt` для фронтенда; интент живёт `intentTtlMs`, сохраняется в хранилище. |
 | `handleWebhook(rawBody, signature)` | Обрабатывает вебхуки Tribute и возвращает событие или `undefined` при дубликате. | Требует сырое тело запроса. Идемпотентен, валидирует HMAC и план. |
 | `getIntentById(intentId)` | Возвращает сохранённый интент. | Удобно для поддержки и аудита. |
 | `getSubscriptionByTributeId(tributeSubscriptionId)` | Ищет подписку по Tribute ID. | Работает, если хранилище поддерживает индексы по Tribute ID. |

@@ -30,7 +30,11 @@ test('creates intents and processes new subscriptions', async (t) => {
     logger: silentLogger,
   });
 
-  const { intentId } = await manager.createSubscriptionIntent({ planId: 'monthly-10', telegramUserId: 123456 });
+  const { intentId, intentExpiresAt } = await manager.createSubscriptionIntent({ planId: 'monthly-10', telegramUserId: 123456 });
+  assert(intentExpiresAt instanceof Date);
+  const ttlMs = intentExpiresAt.getTime() - Date.now();
+  assert(ttlMs > 0);
+  assert(ttlMs <= 15 * 60 * 1000);
   const createdAt = new Date().toISOString();
   const body = Buffer.from(
     JSON.stringify({

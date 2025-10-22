@@ -1,4 +1,12 @@
 import { EventEmitter } from 'node:events';
+import type { Buffer } from 'node:buffer';
+
+export type TributeWebhookBody = Buffer | ArrayBuffer | ArrayBufferView | string;
+
+export interface TributeConfigFsLike {
+  readFileSync(path: string, encoding: 'utf8'): string | Buffer;
+  existsSync(path: string): boolean;
+}
 
 export interface TributePlan {
   id: string;
@@ -179,8 +187,8 @@ export interface TributeConfigOverrides {
 }
 
 export interface TributeConfigOptions {
-  env?: NodeJS.ProcessEnv;
-  fs?: typeof import('node:fs');
+  env?: Record<string, string | undefined>;
+  fs?: TributeConfigFsLike;
 }
 
 export interface ManualCancellationOptions {
@@ -207,7 +215,7 @@ export class TributeSubscriptionManager extends EventEmitter {
   /**
    * Обрабатывает вебхук Tribute. Возвращает `undefined`, если событие устаревшее или повторное.
    */
-  handleWebhook(rawBody: Buffer, signatureHeader: string): Promise<TributeEventResult | undefined>;
+  handleWebhook(rawBody: TributeWebhookBody, signatureHeader: string | undefined | null): Promise<TributeEventResult | undefined>;
 }
 
 export function createTributeConfig(
@@ -222,4 +230,4 @@ export class TributeIntentNotFoundError extends Error { telegramUserId: string |
 export class TributeSubscriptionNotFoundError extends Error { subscriptionId: string | number; }
 export class TributeDonationNotFoundError extends Error { donationRequestId: string | number; }
 
-export function verifyTributeSignature(rawBody: Buffer, signatureHeader: string | undefined | null, apiKey: string, encoding?: 'hex' | 'base64'): boolean;
+export function verifyTributeSignature(rawBody: TributeWebhookBody, signatureHeader: string | undefined | null, apiKey: string, encoding?: 'hex' | 'base64'): boolean;

@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { randomUUID } from 'node:crypto';
+import { randomUUID as nodeRandomUUID } from 'node:crypto';
 import { verifyTributeSignature } from './SignatureVerifier.js';
 import {
   TributeConfigurationError,
@@ -32,6 +32,34 @@ const SUPPORTED_WEBHOOK_EVENTS = [
   'recurrent_donation',
   'cancelled_donation',
 ];
+
+const generateUuid = () => {
+  if (typeof globalThis.crypto?.randomUUID === 'function') {
+    return globalThis.crypto.randomUUID();
+  }
+  return nodeRandomUUID();
+};
+
+/**
+ * Normalize webhook body to a Buffer for JSON parsing.
+ * @param {Buffer | ArrayBuffer | ArrayBufferView | string} rawBody
+ * @returns {Buffer}
+ */
+function toBuffer(rawBody) {
+  if (Buffer.isBuffer(rawBody)) {
+    return rawBody;
+  }
+  if (typeof rawBody === 'string') {
+    return Buffer.from(rawBody);
+  }
+  if (rawBody instanceof ArrayBuffer) {
+    return Buffer.from(rawBody);
+  }
+  if (ArrayBuffer.isView(rawBody)) {
+    return Buffer.from(rawBody.buffer, rawBody.byteOffset, rawBody.byteLength);
+  }
+  throw new TypeError('Expected rawBody to be a Buffer, string or ArrayBuffer view');
+}
 
 /**
  * Subscription manager orchestrates plan selection, Telegram identity verification
@@ -234,7 +262,7 @@ export class TributeSubscriptionManager extends EventEmitter {
     const now = new Date();
     /** @type {SubscriptionIntent} */
     const intent = {
-      id: randomUUID(),
+      id: generateUuid(),
       planId: plan.id,
       telegramUserId,
       createdAt: now,
@@ -254,17 +282,18 @@ export class TributeSubscriptionManager extends EventEmitter {
   /**
    * Verify webhook payload and dispatch to handlers.
    * Returns undefined when event is duplicate or older than the last processed one.
-   * @param {Buffer} rawBody
-   * @param {string} signatureHeader
+   * @param {Buffer | ArrayBuffer | ArrayBufferView | string} rawBody
+   * @param {string | undefined | null} signatureHeader
    * @returns {Promise<TributeEventResult | undefined>}
   */
   async handleWebhook(rawBody, signatureHeader) {
-    const isValid = verifyTributeSignature(rawBody, signatureHeader, this.apiKey, this.signatureEncoding);
+    const bodyBuffer = toBuffer(rawBody);
+    const isValid = verifyTributeSignature(bodyBuffer, signatureHeader, this.apiKey, this.signatureEncoding);
     if (!isValid) {
       throw new TributeSignatureError();
     }
     /** @type {TributeEventEnvelope} */
-    const event = JSON.parse(rawBody.toString('utf8'));
+    const event = JSON.parse(bodyBuffer.toString('utf8'));
     if (!this.allowedWebhookEvents.has(event.name)) {
       this.logger?.debug?.('Ignoring Tribute event disabled by configuration', event.name);
       return undefined;

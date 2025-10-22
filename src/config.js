@@ -2,6 +2,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { TributeConfigurationError } from './errors.js';
 
+/**
+ * @typedef {Object} FsLike
+ * @property {(filePath: string) => boolean} existsSync
+ * @property {(filePath: string, encoding: BufferEncoding) => string | Buffer} readFileSync
+ */
+
 const DEFAULT_INTENT_TTL_MINUTES = 15;
 const SUPPORTED_SIGNATURE_ENCODINGS = ['hex', 'base64'];
 const SUBSCRIPTION_EVENTS = ['new_subscription', 'cancelled_subscription'];
@@ -69,6 +75,9 @@ function loadPlansFromJson(json, source) {
   return data;
 }
 
+/**
+ * @param {{ overrides: any, env: Record<string, any>, fsModule: FsLike }} params
+ */
 function loadPlans({ overrides, env, fsModule }) {
   if (Array.isArray(overrides.plans) && overrides.plans.length > 0) {
     return overrides.plans;
@@ -82,7 +91,8 @@ function loadPlans({ overrides, env, fsModule }) {
       throw new TributeConfigurationError(`Plans file not found: ${filePath}`);
     }
     const fileContents = fsModule.readFileSync(filePath, 'utf8');
-    return loadPlansFromJson(fileContents, filePath);
+    const contentString = typeof fileContents === 'string' ? fileContents : Buffer.from(fileContents).toString('utf8');
+    return loadPlansFromJson(contentString, filePath);
   }
   if (env.TRIBUTE_PLANS) {
     return loadPlansFromJson(env.TRIBUTE_PLANS, 'TRIBUTE_PLANS');
@@ -93,7 +103,8 @@ function loadPlans({ overrides, env, fsModule }) {
       throw new TributeConfigurationError(`Plans file not found: ${filePath}`);
     }
     const fileContents = fsModule.readFileSync(filePath, 'utf8');
-    return loadPlansFromJson(fileContents, filePath);
+    const contentString = typeof fileContents === 'string' ? fileContents : Buffer.from(fileContents).toString('utf8');
+    return loadPlansFromJson(contentString, filePath);
   }
   return [];
 }
@@ -158,13 +169,19 @@ function resolveEventPublisherFailureMode(overrides, env) {
  * @param {Object} [overrides.logger]
  * @param {import('./store/SubscriptionStore.js').SubscriptionStore} [overrides.store]
  * @param {Object} [options]
- * @param {NodeJS.ProcessEnv} [options.env]
- * @param {typeof import('node:fs')} [options.fs]
+ * @param {Record<string, string | undefined>} [options.env]
+ * @param {FsLike} [options.fs]
  * @returns {{ plans: import('./types.js').TributePlan[], apiKey: string, intentTtlMs: number, signatureEncoding: "hex"|"base64", allowedWebhookEvents: string[], logger?: any, store?: any }}
  */
 export function createTributeConfig(overrides = {}, options = {}) {
-  const env = options.env ?? process.env;
+  const env = options.env
+    ?? (typeof Bun !== 'undefined' ? Bun.env : undefined)
+    ?? (typeof process !== 'undefined' ? process.env : undefined)
+    ?? {};
   const fsModule = options.fs ?? fs;
+  if (typeof fsModule?.readFileSync !== 'function' || typeof fsModule?.existsSync !== 'function') {
+    throw new TributeConfigurationError('options.fs must provide readFileSync and existsSync functions');
+  }
   const plans = loadPlans({ overrides, env, fsModule });
   if (!plans.length) {
     throw new TributeConfigurationError('No subscription plans defined. Provide overrides.plans or TRIBUTE_PLANS');

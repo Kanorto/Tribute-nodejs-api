@@ -10,10 +10,10 @@
     "./config": "./src/config.js"
   },
   "scripts": {
-    "test": "node --test"
+    "test": "bun test"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "bun": ">=1.0.0"
   },
   "keywords": [
     "tribute",

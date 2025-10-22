@@ -245,7 +245,7 @@ export class TributeSubscriptionManager extends EventEmitter {
     this.logger?.debug?.('Tribute intent created', intent);
     return {
       intentId: intent.id,
-      intentExpiresAt: intent.expiresAt,
+      intentExpiresAt: new Date(intent.expiresAt.getTime()),
       subscriptionLink: plan.subscriptionLink,
       plan,
     };

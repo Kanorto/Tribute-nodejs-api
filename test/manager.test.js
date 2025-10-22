@@ -35,6 +35,12 @@ test('creates intents and processes new subscriptions', async (t) => {
   const ttlMs = intentExpiresAt.getTime() - Date.now();
   assert(ttlMs > 0);
   assert(ttlMs <= 15 * 60 * 1000);
+  const storedIntent = await store.getIntentById(intentId);
+  assert(storedIntent);
+  assert.notEqual(intentExpiresAt, storedIntent.expiresAt);
+  const storedExpiryMs = storedIntent.expiresAt.getTime();
+  intentExpiresAt.setTime(intentExpiresAt.getTime() + 60 * 1000);
+  assert.equal(storedIntent.expiresAt.getTime(), storedExpiryMs);
   const createdAt = new Date().toISOString();
   const body = Buffer.from(
     JSON.stringify({

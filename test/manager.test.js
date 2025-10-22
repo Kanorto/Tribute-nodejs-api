@@ -1,4 +1,4 @@
-import test from 'node:test';
+import { test } from 'bun:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { TributeSubscriptionManager, InMemorySubscriptionStore, TributeSignatureError, createTributeConfig } from '../src/index.js';
@@ -6,11 +6,28 @@ import { TributeSubscriptionManager, InMemorySubscriptionStore, TributeSignature
 const SECRET = 'test-secret';
 const silentLogger = { debug() {}, info() {}, warn() {}, error() {} };
 
-function sign(body) {
-  return crypto.createHmac('sha256', SECRET).update(body).digest('hex');
+function toBufferLike(body) {
+  if (Buffer.isBuffer(body)) {
+    return body;
+  }
+  if (typeof body === 'string') {
+    return Buffer.from(body);
+  }
+  if (body instanceof ArrayBuffer) {
+    return Buffer.from(body);
+  }
+  if (ArrayBuffer.isView(body)) {
+    return Buffer.from(body.buffer, body.byteOffset, body.byteLength);
+  }
+  throw new TypeError('Unsupported body type for signing');
 }
 
-test('creates intents and processes new subscriptions', async (t) => {
+function sign(body) {
+  const normalized = toBufferLike(body);
+  return crypto.createHmac('sha256', SECRET).update(normalized).digest('hex');
+}
+
+test('creates intents and processes new subscriptions', async () => {
   const store = new InMemorySubscriptionStore();
   const manager = new TributeSubscriptionManager({
     plans: [
@@ -65,70 +82,67 @@ test('creates intents and processes new subscriptions', async (t) => {
   assert.equal(store.payments.length, 1);
   assert.equal(store.payments[0].kind, 'subscription');
 
-  await t.test('duplicate subscription webhook is ignored', async () => {
-    const duplicate = await manager.handleWebhook(body, sign(body));
-    assert.equal(duplicate, undefined);
-    assert.equal(store.payments.length, 1);
-  });
+  // duplicate subscription webhook is ignored
+  const duplicate = await manager.handleWebhook(body, sign(body));
+  assert.equal(duplicate, undefined);
+  assert.equal(store.payments.length, 1);
 
-  await t.test('renewal does not require intent', async () => {
-    const renewalBody = Buffer.from(
-      JSON.stringify({
-        name: 'new_subscription',
-        created_at: new Date(Date.now() + 31 * 24 * 60 * 60 * 1000).toISOString(),
-        sent_at: new Date(Date.now() + 31 * 24 * 60 * 60 * 1000).toISOString(),
-        payload: {
-          subscription_id: 1644,
-          period_id: 1547,
-          period: 'monthly',
-          price: 1000,
-          amount: 1000,
-          currency: 'eur',
-          telegram_user_id: 123456,
-          expires_at: new Date(Date.now() + 61 * 24 * 60 * 60 * 1000).toISOString(),
-        },
-      })
-    );
-    const renewal = await manager.handleWebhook(renewalBody, sign(renewalBody));
-    assert.equal(renewal?.category, 'subscription');
-    assert.equal(renewal?.type, 'renewed');
-    assert.equal(store.payments.length, 2);
+  // renewal does not require intent
+  const renewalBody = Buffer.from(
+    JSON.stringify({
+      name: 'new_subscription',
+      created_at: new Date(Date.now() + 31 * 24 * 60 * 60 * 1000).toISOString(),
+      sent_at: new Date(Date.now() + 31 * 24 * 60 * 60 * 1000).toISOString(),
+      payload: {
+        subscription_id: 1644,
+        period_id: 1547,
+        period: 'monthly',
+        price: 1000,
+        amount: 1000,
+        currency: 'eur',
+        telegram_user_id: 123456,
+        expires_at: new Date(Date.now() + 61 * 24 * 60 * 60 * 1000).toISOString(),
+      },
+    })
+  );
+  const renewal = await manager.handleWebhook(renewalBody, sign(renewalBody));
+  assert.equal(renewal?.category, 'subscription');
+  assert.equal(renewal?.type, 'renewed');
+  assert.equal(store.payments.length, 2);
 
-    const duplicateRenewal = await manager.handleWebhook(renewalBody, sign(renewalBody));
-    assert.equal(duplicateRenewal, undefined);
-    assert.equal(store.payments.length, 2);
-  });
+  const duplicateRenewal = await manager.handleWebhook(renewalBody, sign(renewalBody));
+  assert.equal(duplicateRenewal, undefined);
+  assert.equal(store.payments.length, 2);
 
-  await t.test('cancellation updates status', async () => {
-    const cancelBody = Buffer.from(
-      JSON.stringify({
-        name: 'cancelled_subscription',
-        created_at: new Date(Date.now() + 32 * 24 * 60 * 60 * 1000).toISOString(),
-        sent_at: new Date(Date.now() + 32 * 24 * 60 * 60 * 1000).toISOString(),
-        payload: {
-          subscription_id: 1644,
-          period_id: 1547,
-          period: 'monthly',
-          price: 1000,
-          amount: 1000,
-          currency: 'eur',
-          telegram_user_id: 123456,
-          cancel_reason: 'user_cancelled',
-        },
-      })
-    );
-    const cancelled = await manager.handleWebhook(cancelBody, sign(cancelBody));
-    assert.equal(cancelled?.category, 'subscription');
-    assert.equal(cancelled?.type, 'cancelled');
-    const updated = store.subscriptions.get(1644);
-    assert(updated);
-    assert.equal(updated.status, 'cancelled');
-    assert.equal(updated.cancelReason, 'user_cancelled');
+  // cancellation updates status
+  const cancelBody = Buffer.from(
+    JSON.stringify({
+      name: 'cancelled_subscription',
+      created_at: new Date(Date.now() + 32 * 24 * 60 * 60 * 1000).toISOString(),
+      sent_at: new Date(Date.now() + 32 * 24 * 60 * 60 * 1000).toISOString(),
+      payload: {
+        subscription_id: 1644,
+        period_id: 1547,
+        period: 'monthly',
+        price: 1000,
+        amount: 1000,
+        currency: 'eur',
+        telegram_user_id: 123456,
+        cancel_reason: 'user_cancelled',
+      },
+    })
+  );
+  const cancelled = await manager.handleWebhook(cancelBody, sign(cancelBody));
+  assert.equal(cancelled?.category, 'subscription');
+  assert.equal(cancelled?.type, 'cancelled');
+  const updated = store.subscriptions.get(1644);
+  assert(updated);
+  assert.equal(updated.status, 'cancelled');
+  assert.equal(updated.cancelReason, 'user_cancelled');
 
-    const duplicateCancel = await manager.handleWebhook(cancelBody, sign(cancelBody));
-    assert.equal(duplicateCancel, undefined);
-    assert.equal(store.subscriptions.get(1644)?.status, 'cancelled');
-  });
+  const duplicateCancel = await manager.handleWebhook(cancelBody, sign(cancelBody));
+  assert.equal(duplicateCancel, undefined);
+  assert.equal(store.subscriptions.get(1644)?.status, 'cancelled');
 });
 
 test('rejects invalid signatures', async () => {
@@ -152,7 +166,7 @@ test('rejects invalid signatures', async () => {
   await assert.rejects(() => manager.handleWebhook(body, 'wrong-signature'), TributeSignatureError);
 });
 
-test('processes donation and donation lifecycle events', async (t) => {
+test('processes donation and donation lifecycle events', async () => {
   const store = new InMemorySubscriptionStore();
   const manager = new TributeSubscriptionManager({
     plans: [
@@ -198,60 +212,117 @@ test('processes donation and donation lifecycle events', async (t) => {
   assert.equal(donation.status, 'active');
   assert.equal(store.payments.at(-1)?.kind, 'donation');
 
-  await t.test('duplicate donation webhook is ignored', async () => {
-    const duplicate = await manager.handleWebhook(donationBody, sign(donationBody));
-    assert.equal(duplicate, undefined);
-    assert.equal(store.payments.filter((p) => p.kind === 'donation').length, 1);
+  // duplicate donation webhook is ignored
+  const duplicateDonation = await manager.handleWebhook(donationBody, sign(donationBody));
+  assert.equal(duplicateDonation, undefined);
+  assert.equal(store.payments.filter((p) => p.kind === 'donation').length, 1);
+
+  // recurrent donation updates last event
+  const recurrentBody = Buffer.from(
+    JSON.stringify({
+      name: 'recurrent_donation',
+      created_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+      sent_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+      payload: {
+        donation_request_id: 501,
+        donation_name: 'Support project',
+        period: 'monthly',
+        amount: 1000,
+        currency: 'usd',
+        anonymously: false,
+        telegram_user_id: 987654,
+        user_id: 555,
+      },
+    })
+  );
+  const recurrent = await manager.handleWebhook(recurrentBody, sign(recurrentBody));
+  assert.equal(recurrent?.category, 'donation');
+  assert.equal(recurrent?.type, 'recurrent');
+  assert.equal(store.payments.filter((p) => p.kind === 'donation').length, 2);
+
+  const duplicateRecurrent = await manager.handleWebhook(recurrentBody, sign(recurrentBody));
+  assert.equal(duplicateRecurrent, undefined);
+  assert.equal(store.payments.filter((p) => p.kind === 'donation').length, 2);
+
+  // cancelled donation updates status
+  const cancelBody = Buffer.from(
+    JSON.stringify({
+      name: 'cancelled_donation',
+      created_at: new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString(),
+      sent_at: new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString(),
+      payload: {
+        donation_request_id: 501,
+      },
+    })
+  );
+  const cancelledDonation = await manager.handleWebhook(cancelBody, sign(cancelBody));
+  assert.equal(cancelledDonation?.category, 'donation');
+  assert.equal(cancelledDonation?.type, 'cancelled');
+  assert.equal(store.donations.get(501)?.status, 'cancelled');
+
+  const duplicateCancel = await manager.handleWebhook(cancelBody, sign(cancelBody));
+  assert.equal(duplicateCancel, undefined);
+  assert.equal(store.donations.get(501)?.status, 'cancelled');
+});
+
+test('accepts Uint8Array and ArrayBuffer webhook bodies', async () => {
+  const store = new InMemorySubscriptionStore();
+  const manager = new TributeSubscriptionManager({
+    plans: [
+      {
+        id: 'placeholder',
+        title: 'Placeholder',
+        amount: 500,
+        currency: 'usd',
+        period: 'monthly',
+        subscriptionLink: 'https://t.me/tribute/app?startapp=placeholder',
+      },
+    ],
+    apiKey: SECRET,
+    store,
+    logger: silentLogger,
   });
 
-  await t.test('recurrent donation updates last event', async () => {
-    const recurrentBody = Buffer.from(
-      JSON.stringify({
-        name: 'recurrent_donation',
-        created_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-        sent_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-        payload: {
-          donation_request_id: 501,
-          donation_name: 'Support project',
-          period: 'monthly',
-          amount: 1000,
-          currency: 'usd',
-          anonymously: false,
-          telegram_user_id: 987654,
-          user_id: 555,
-        },
-      })
-    );
-    const recurrent = await manager.handleWebhook(recurrentBody, sign(recurrentBody));
-    assert.equal(recurrent?.category, 'donation');
-    assert.equal(recurrent?.type, 'recurrent');
-    assert.equal(store.payments.filter((p) => p.kind === 'donation').length, 2);
+  const now = Date.now();
+  const payload = {
+    name: 'new_donation',
+    created_at: new Date(now).toISOString(),
+    sent_at: new Date(now).toISOString(),
+    payload: {
+      donation_request_id: 777,
+      donation_name: 'Support project',
+      telegram_user_id: 999,
+      amount: 2500,
+      currency: 'eur',
+      period: 'monthly',
+      anonymously: false,
+      message: 'Спасибо!',
+    },
+  };
+  const buffer = Buffer.from(JSON.stringify(payload));
+  const uint8 = new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+  const result = await manager.handleWebhook(uint8, sign(uint8));
+  assert.equal(result?.category, 'donation');
+  assert.equal(result?.type, 'created');
 
-    const duplicateRecurrent = await manager.handleWebhook(recurrentBody, sign(recurrentBody));
-    assert.equal(duplicateRecurrent, undefined);
-    assert.equal(store.payments.filter((p) => p.kind === 'donation').length, 2);
-  });
-
-  await t.test('cancelled donation updates status', async () => {
-    const cancelBody = Buffer.from(
-      JSON.stringify({
-        name: 'cancelled_donation',
-        created_at: new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString(),
-        sent_at: new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString(),
-        payload: {
-          donation_request_id: 501,
-        },
-      })
-    );
-    const cancelled = await manager.handleWebhook(cancelBody, sign(cancelBody));
-    assert.equal(cancelled?.category, 'donation');
-    assert.equal(cancelled?.type, 'cancelled');
-    assert.equal(store.donations.get(501)?.status, 'cancelled');
-
-    const duplicateCancel = await manager.handleWebhook(cancelBody, sign(cancelBody));
-    assert.equal(duplicateCancel, undefined);
-    assert.equal(store.donations.get(501)?.status, 'cancelled');
-  });
+  const cancel = {
+    name: 'cancelled_donation',
+    created_at: new Date(now + 60 * 1000).toISOString(),
+    sent_at: new Date(now + 60 * 1000).toISOString(),
+    payload: {
+      donation_request_id: 777,
+      telegram_user_id: 999,
+      cancel_reason: 'user_cancelled',
+    },
+  };
+  const cancelBuffer = Buffer.from(JSON.stringify(cancel));
+  const arrayBuffer = cancelBuffer.buffer.slice(
+    cancelBuffer.byteOffset,
+    cancelBuffer.byteOffset + cancelBuffer.byteLength,
+  );
+  const cancelled = await manager.handleWebhook(arrayBuffer, sign(arrayBuffer));
+  assert.equal(cancelled?.category, 'donation');
+  assert.equal(cancelled?.type, 'cancelled');
 });
 
 test('manager ignores disabled webhook categories', async () => {
@@ -375,160 +446,157 @@ test('exposes query helpers and manual cancellation workflow', async () => {
   assert.equal(filteredPayments[0].kind, 'subscription');
 });
 
-test('event publisher integration and failure modes', async (t) => {
-  await t.test('dispatches processed events to external publisher', async () => {
-    const store = new InMemorySubscriptionStore();
-    const captured = [];
-    const manager = new TributeSubscriptionManager({
-      plans: [
-        {
-          id: 'publisher-plan',
-          title: 'Publisher Plan',
-          amount: 800,
-          currency: 'eur',
-          period: 'monthly',
-          subscriptionLink: 'https://t.me/tribute/app?startapp=publisher',
-          tributeSubscriptionId: 3101,
-          tributePeriodId: 3201,
-        },
-      ],
-      apiKey: SECRET,
-      store,
-      logger: silentLogger,
-      eventPublisher(event) {
-        captured.push(event);
+test('event publisher integration and failure modes', async () => {
+  // dispatches processed events to external publisher
+  const store = new InMemorySubscriptionStore();
+  const captured = [];
+  const manager = new TributeSubscriptionManager({
+    plans: [
+      {
+        id: 'publisher-plan',
+        title: 'Publisher Plan',
+        amount: 800,
+        currency: 'eur',
+        period: 'monthly',
+        subscriptionLink: 'https://t.me/tribute/app?startapp=publisher',
+        tributeSubscriptionId: 3101,
+        tributePeriodId: 3201,
       },
-    });
-
-    const createdAt = new Date().toISOString();
-    const body = Buffer.from(
-      JSON.stringify({
-        name: 'new_subscription',
-        created_at: createdAt,
-        sent_at: createdAt,
-        payload: {
-          subscription_id: 3101,
-          period_id: 3201,
-          period: 'monthly',
-          price: 800,
-          amount: 800,
-          currency: 'eur',
-          telegram_user_id: 5551,
-        },
-      })
-    );
-
-    await manager.createSubscriptionIntent({ planId: 'publisher-plan', telegramUserId: 5551 });
-    const result = await manager.handleWebhook(body, sign(body));
-    assert.equal(result?.type, 'created');
-    assert.equal(captured.length, 1);
-    assert.equal(captured[0].category, 'subscription');
-    assert.equal(captured[0].type, 'created');
+    ],
+    apiKey: SECRET,
+    store,
+    logger: silentLogger,
+    eventPublisher(event) {
+      captured.push(event);
+    },
   });
 
-  await t.test('throwing publisher propagates error by default', async () => {
-    const store = new InMemorySubscriptionStore();
-    const manager = new TributeSubscriptionManager({
-      plans: [
-        {
-          id: 'publisher-plan-throw',
-          title: 'Publisher Plan Throw',
-          amount: 900,
-          currency: 'eur',
-          period: 'monthly',
-          subscriptionLink: 'https://t.me/tribute/app?startapp=publisher-throw',
-          tributeSubscriptionId: 4101,
-          tributePeriodId: 4201,
-        },
-      ],
-      apiKey: SECRET,
-      store,
-      logger: silentLogger,
-      eventPublisher() {
-        throw new Error('queue offline');
+  const createdAt = new Date().toISOString();
+  const body = Buffer.from(
+    JSON.stringify({
+      name: 'new_subscription',
+      created_at: createdAt,
+      sent_at: createdAt,
+      payload: {
+        subscription_id: 3101,
+        period_id: 3201,
+        period: 'monthly',
+        price: 800,
+        amount: 800,
+        currency: 'eur',
+        telegram_user_id: 5551,
       },
-    });
+    })
+  );
 
-    const createdAt = new Date(Date.now() + 1000).toISOString();
-    const body = Buffer.from(
-      JSON.stringify({
-        name: 'new_subscription',
-        created_at: createdAt,
-        sent_at: createdAt,
-        payload: {
-          subscription_id: 4101,
-          period_id: 4201,
-          period: 'monthly',
-          price: 900,
-          amount: 900,
-          currency: 'eur',
-          telegram_user_id: 5552,
-        },
-      })
-    );
+  await manager.createSubscriptionIntent({ planId: 'publisher-plan', telegramUserId: 5551 });
+  const result = await manager.handleWebhook(body, sign(body));
+  assert.equal(result?.type, 'created');
+  assert.equal(captured.length, 1);
+  assert.equal(captured[0].category, 'subscription');
+  assert.equal(captured[0].type, 'created');
 
-    await manager.createSubscriptionIntent({ planId: 'publisher-plan-throw', telegramUserId: 5552 });
-    await assert.rejects(() => manager.handleWebhook(body, sign(body)), /queue offline/);
-    assert.equal(store.payments.length, 1);
-    assert.equal(store.payments[0].kind, 'subscription');
+  // throwing publisher propagates error by default
+  const throwingStore = new InMemorySubscriptionStore();
+  const throwingManager = new TributeSubscriptionManager({
+    plans: [
+      {
+        id: 'publisher-plan-throw',
+        title: 'Publisher Plan Throw',
+        amount: 900,
+        currency: 'eur',
+        period: 'monthly',
+        subscriptionLink: 'https://t.me/tribute/app?startapp=publisher-throw',
+        tributeSubscriptionId: 4101,
+        tributePeriodId: 4201,
+      },
+    ],
+    apiKey: SECRET,
+    store: throwingStore,
+    logger: silentLogger,
+    eventPublisher() {
+      throw new Error('queue offline');
+    },
   });
 
-  await t.test('log failure mode keeps webhook successful while logging error', async () => {
-    const store = new InMemorySubscriptionStore();
-    const logged = [];
-    const manager = new TributeSubscriptionManager({
-      plans: [
-        {
-          id: 'publisher-plan-log',
-          title: 'Publisher Plan Log',
-          amount: 1000,
-          currency: 'eur',
-          period: 'monthly',
-          subscriptionLink: 'https://t.me/tribute/app?startapp=publisher-log',
-          tributeSubscriptionId: 5101,
-          tributePeriodId: 5201,
-        },
-      ],
-      apiKey: SECRET,
-      store,
-      logger: {
-        ...silentLogger,
-        error(message, details) {
-          logged.push({ message, details });
-        },
+  const throwingCreatedAt = new Date(Date.now() + 1000).toISOString();
+  const throwingBody = Buffer.from(
+    JSON.stringify({
+      name: 'new_subscription',
+      created_at: throwingCreatedAt,
+      sent_at: throwingCreatedAt,
+      payload: {
+        subscription_id: 4101,
+        period_id: 4201,
+        period: 'monthly',
+        price: 900,
+        amount: 900,
+        currency: 'eur',
+        telegram_user_id: 5552,
       },
-      eventPublisherFailureMode: 'log',
-      eventPublisher() {
-        throw new Error('queue offline');
+    })
+  );
+
+  await throwingManager.createSubscriptionIntent({ planId: 'publisher-plan-throw', telegramUserId: 5552 });
+  await assert.rejects(() => throwingManager.handleWebhook(throwingBody, sign(throwingBody)), /queue offline/);
+  assert.equal(throwingStore.payments.length, 1);
+  assert.equal(throwingStore.payments[0].kind, 'subscription');
+
+  // log failure mode keeps webhook successful while logging error
+  const logStore = new InMemorySubscriptionStore();
+  const logged = [];
+  const loggingManager = new TributeSubscriptionManager({
+    plans: [
+      {
+        id: 'publisher-plan-log',
+        title: 'Publisher Plan Log',
+        amount: 1000,
+        currency: 'eur',
+        period: 'monthly',
+        subscriptionLink: 'https://t.me/tribute/app?startapp=publisher-log',
+        tributeSubscriptionId: 5101,
+        tributePeriodId: 5201,
       },
-    });
-
-    const createdAt = new Date(Date.now() + 2000).toISOString();
-    const body = Buffer.from(
-      JSON.stringify({
-        name: 'new_subscription',
-        created_at: createdAt,
-        sent_at: createdAt,
-        payload: {
-          subscription_id: 5101,
-          period_id: 5201,
-          period: 'monthly',
-          price: 1000,
-          amount: 1000,
-          currency: 'eur',
-          telegram_user_id: 5553,
-        },
-      })
-    );
-
-    await manager.createSubscriptionIntent({ planId: 'publisher-plan-log', telegramUserId: 5553 });
-    const result = await manager.handleWebhook(body, sign(body));
-    assert.equal(result?.type, 'created');
-    assert.equal(store.payments.length, 1);
-    assert.equal(logged.length, 1);
-    assert.equal(logged[0].message, 'Tribute event publisher failed');
-    assert.equal(logged[0].details.category, 'subscription');
+    ],
+    apiKey: SECRET,
+    store: logStore,
+    logger: {
+      ...silentLogger,
+      error(message, details) {
+        logged.push({ message, details });
+      },
+    },
+    eventPublisherFailureMode: 'log',
+    eventPublisher() {
+      throw new Error('queue offline');
+    },
   });
+
+  const loggingCreatedAt = new Date(Date.now() + 2000).toISOString();
+  const loggingBody = Buffer.from(
+    JSON.stringify({
+      name: 'new_subscription',
+      created_at: loggingCreatedAt,
+      sent_at: loggingCreatedAt,
+      payload: {
+        subscription_id: 5101,
+        period_id: 5201,
+        period: 'monthly',
+        price: 1000,
+        amount: 1000,
+        currency: 'eur',
+        telegram_user_id: 5553,
+      },
+    })
+  );
+
+  await loggingManager.createSubscriptionIntent({ planId: 'publisher-plan-log', telegramUserId: 5553 });
+  const loggingResult = await loggingManager.handleWebhook(loggingBody, sign(loggingBody));
+  assert.equal(loggingResult?.type, 'created');
+  assert.equal(logStore.payments.length, 1);
+  assert.equal(logged.length, 1);
+  assert.equal(logged[0].message, 'Tribute event publisher failed');
+  assert.equal(logged[0].details.category, 'subscription');
 });
 
 test('createTributeConfig loads plans and options from environment', () => {

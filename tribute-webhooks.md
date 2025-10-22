@@ -65,6 +65,37 @@ app.post('/webhooks/tribute', (req, res) => {
 app.listen(3000);
 ```
 
+### Bun (Bun.serve)
+
+```js
+import { Buffer } from 'node:buffer';
+import { verifyTributeSignature } from 'tribute-nodejs-api';
+
+const apiKey = Bun.env.TRIBUTE_API_KEY;
+
+const server = Bun.serve({
+  port: 3000,
+  async fetch(request) {
+    if (request.method !== 'POST' || new URL(request.url).pathname !== '/webhooks/tribute') {
+      return new Response('not found', { status: 404 });
+    }
+
+    const rawBody = await request.arrayBuffer();
+    const signature = request.headers.get('trbt-signature');
+
+    if (!verifyTributeSignature(rawBody, signature, apiKey)) {
+      return new Response('invalid signature', { status: 401 });
+    }
+
+    const event = JSON.parse(Buffer.from(rawBody).toString('utf8'));
+    console.log('Tribute event:', event.name);
+    return new Response('ok');
+  },
+});
+
+console.log(`Webhook server running on http://localhost:${server.port}`);
+```
+
 ### Python (Flask)
 
 ```py
